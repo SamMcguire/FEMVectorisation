@@ -13,6 +13,7 @@ class ImageVec:
 	##############################################
 	def __init__(self, fileName):
 		self.img = mpimg.imread(fileName)
+		#Removing alpha channel
 		if(self.img.shape[2]==4):
 			self.img = self.img[:,:, :3]
 
@@ -22,61 +23,27 @@ class ImageVec:
 		self.segments = None
 		self.boundaryClasses = None
 
-
-	#Generates geometry for NGSolve FEM
-	#Input geo : spline geometry object
-	#Input scale : scale of mesh
-	def GenerateGeometry(self, geo, scale = 1):
-		curves = []
-		n = len(self.segments)
-
-		pnts = scale*(self.segments-np.min(self.segments))/(np.max(self.segments)-np.min(self.segments))
-		pnts = np.array([[pnt[0], scale-pnt[1]] for pnt in pnts ])
-		if(pnts[0][0]>pnts[-1][0]):
-			pnts = np.flipud(pnts)
-		#print(f"This works fine: \n{pnts}")
-		#print(f"This Doesnt work.: \n{pnts}")
-		# print("Here is before transform")
-		# print(pnts)
-		# pnts = np.flipud(pnts)
-		# x = []
-		# y = []
-		# for pt in pnts:
-		# 	x.append(pt[0])
-		# 	y.append(pt[1])
-		# plt.plot(x,y)
-		# plt.show()
-
-		# print("Below is after transform")
-		# print(pnts)
-		newPts = [geo.AppendPoint(*pnt) for pnt in pnts]
-		i = 0
-		for i in range(n):
-			#print(f"Old Points: {self.segments[i]} New Points: {newPts[i]}")
-			pixLoc = self.segments[n-i-1]
-			colStr = ImageVec.GetColorString(self.img[pixLoc[1], pixLoc[0]])
-			name = str(self.boundaryClasses[colStr])
-			#name = "temp"
-			curves.append([["line", newPts[i], newPts[(i+1)%n]], name])
-
-		# for c in curves:
-		# 	print(c)
-
-		[geo.Append(c,bc=bc) for c,bc in curves];
-
-	#use integer for functions if using defualt funcs!!!!!
+	#Function to get line vectorisation of image
+	#Output: Numpy array of endpoints of line segments [[x_1,y_1],[x_2,y_2],...] where locations are pixel locations
+	#INPUTS: 
+	#	kWidth: How wide curves it recognises
+	#	blurRadius: How susceptible to noise it is
+	#	numSegments: number of line segments wanted
+	# 	display: Wether to display vectorisation
+	#	saveFig: file to save fig to(leave empty to not save)
 	def GetVectorisation(self, kWidth = 20, blurRadius = 30, numSegments = 10,
 	 display = True, saveFig = ""):
 		self.pixelList = ImageVec.GetPixelList(self.img)
 		boundaryPnts = ImageVec.GetBoundaryPoints(self.img, self.pixelList)
 		self.boundaryClasses = ImageVec.GetBoundaryClasses(self.img, self.pixelList)
-		#print(ImageVec.GetBoundaryClasses(self.img, pixelList))
 
 		kList = ImageVec.GetDotCurvatureList(kWidth, self.pixelList)	
 		self.kList = ImageVec.GaussianFilt(blurRadius, kList)
-		self.breakPoints = ImageVec.GetBreakPoints(numSegments, 1000, self.kList, boundaryPnts)
-		self.breakPoints = np.unique(self.breakPoints)
 
+		self.breakPoints = ImageVec.GetBreakPoints(numSegments, 1000, self.kList, boundaryPnts)
+		self.breakPoints = np.unique(self.breakPoints) #removing duplicates 
+
+		#Saving figures
 		if(saveFig or display):
 			ImageVis.QuadPlot(self.img, self.pixelList, self.kList, self.boundaryClasses, self.breakPoints)
 		if(saveFig):
@@ -84,13 +51,50 @@ class ImageVec:
 		if(display):
 			plt.show()
 
-		imgHeight = self.img.shape[0]
 		self.segments = [(self.pixelList[brk][0], self.pixelList[brk][1]) for brk in self.breakPoints ]
-		# for segment in self.segments:
-		# 	print(segment)
 		return self.segments
 
 
+	#Generates geometry for NGSolve FEM
+	#Output: sets geometry of geo
+	#Inputs:
+	#	geo : spline geometry object
+	#	scale : scale of mesh
+	def GenerateGeometry(self, geo, scale = 1):
+		#Scaling points to be in range [0,scale]
+		pnts = scale*(self.segments-np.min(self.segments))/(np.max(self.segments)-np.min(self.segments))
+		#setting bottom left as (0,0)
+		pnts = np.array([[pnt[0], scale-pnt[1]] for pnt in pnts ])
+		#sometimes order is wrong, so fix it if so
+		flipped = False
+		if(pnts[0][0]>pnts[-1][0]):
+			flipped = True
+			pnts = np.flipud(pnts)
+
+		newPts = [geo.AppendPoint(*pnt) for pnt in pnts]
+		#Creating curves
+		curves = []
+		n = len(self.segments)
+		for i in range(n):
+			if(flipped):
+				pixLoc = self.segments[n-i-1]
+			else:
+				pixLoc = self.segments[i]
+			colStr = ImageVec.GetColorString(self.img[pixLoc[1], pixLoc[0]])
+			name = str(self.boundaryClasses[colStr])
+			curves.append([["line", newPts[i], newPts[(i+1)%n]], name])
+
+		[geo.Append(c,bc=bc) for c,bc in curves];
+
+
+
+
+	##############################################
+	#############Private functions################
+	##############################################
+	#Function to get list of pixels in order
+	#Output: list of pixels in form [[x1,y1],[x2,y2]...]
+	#Input: img array
 	def GetPixelList(_img):
 		#padding with zeros to handle edge cases
 		img = np.pad(_img, pad_width = ((1,1),(1,1),(0,0)), constant_values = 1)
@@ -103,60 +107,75 @@ class ImageVec:
 		#[[x1,y1],[x2,y2]...]
 		pixelLst = np.zeros((numPixels, 2), int)
 		for i in range(numPixels):
-			#pixelLst[i] = [x,y]
 			pixelLst[i] = [x-1,y-1]
 			#Setting to white so doesnt look at this pixel again
 			img[y,x] = ImageVec.WHITE_PIX
 			x,y = ImageVec.GetNextPixel(x,y,img)
+			#If it can not find the next pixel print an error
 			if(x == -1 and i < numPixels-1):
 				print("Error in reading image!")
 				ImageVis.PlotError(img, pixelLst)
 				return -1
 		return pixelLst
 
-	
+	#Function to get the raw curvature list
+	#Output: list [k1,k2,k3,...], where ki is float from [0,2] representing curvature of pixel i
 	def GetDotCurvatureList(r, pixelList):
 		numPixels = pixelList.shape[0]
 		kList = np.zeros(numPixels, float)
 		for i in range(numPixels):
+			#getting unit vectors in either direction
 			l1 = ImageVec.GetUnitVec(pixelList[i], pixelList[(i+r)%numPixels])#pixel on left
 			l2 = ImageVec.GetUnitVec(pixelList[i], pixelList[(i-r)%numPixels])#pixel on right
+			#performing dot product (must clamp as in some cases is a small negative number)
 			kList[i] = max(l1[0]*l2[0]+l1[1]*l2[1]+1, 0)
 		return kList
 
+	#Gaussian filter function:
+	#Output: filtered curvature list
+	#Inputs: 
+	#	r: radius of blur
+	#	kList: list to blur
 	def GaussianFilt(r, kList):
 		return gaussian_filter1d(kList, r, mode='wrap') 
 
+	#Calculates repulsive force of pixel with curvature k at distance dist
 	def GetForce(k, dist):
 		return 1/((dist+1)**3*(k+0.0000001))
 
+	#Function to get endpoints of line segments
+	#Output: list of breakPoints [i1,i2,...], where ij is an index of which point in the kList is a breakpoint
 	def GetBreakPoints(numSegments, numTrials, kList, boundaryPoints):
-		stepSize = (int)(len(kList)/numSegments)
+		#getting peaks
 		peaks, _ = find_peaks(kList, prominence = 0.005) 
+		#setting stationary points to peaks and boundary points
 		still = np.concatenate((peaks, boundaryPoints))
+		stepSize = (int)(len(kList)/numSegments)
+		#uniformly distributing break points
 		breakIndxs = np.arange(0,len(kList)-stepSize+stepSize*(len(still)+1),stepSize)
 		brkCopy = breakIndxs.copy()
 
+		#setting locations for stationary points
 		for i in range(1,len(still)+1):
 			brkCopy[-i] = still[i-1]
+		#removing duplicates
 		brkCopy = np.unique(brkCopy)
 
 		for i in range(numTrials):
 			breakIndxs = np.sort(brkCopy.copy())
 			for j in range(1,len(breakIndxs)-1):
-				if(brkCopy[j] in still):#== int(len(breakIndxs)/2)):
+				#dont move stationary points
+				if(brkCopy[j] in still):
 					continue
+
 				f = ImageVec.GetSumForce(j, breakIndxs, kList)
 				newIndx = (breakIndxs[j]-round(f))%len(kList)
+				#set new location if not going to land on another point
 				if(newIndx not in breakIndxs):
 					brkCopy[j] = newIndx
 
 		return brkCopy 
 
-
-	##############################################
-	#############Private functions################
-	##############################################
 	#Returns next colored pixel by anticlockwise rotatoin starting from top
 	def GetNextPixel(x,y, img):
 		if(img[y-1,x,0]<1):
@@ -183,6 +202,7 @@ class ImageVec:
 		vecMag =  math.sqrt(lineVec[0]**2+lineVec[1]**2)
 		return [lineVec[0]/vecMag ,lineVec[1]/vecMag]
 
+	#Gets points on the boundary between two colors
 	def GetBoundaryPoints(img, pixelList):
 		boundaryPnts = []
 		n = len(pixelList)
@@ -193,25 +213,30 @@ class ImageVec:
 				boundaryPnts.append(i)
 		return boundaryPnts
 
+	#Gets dictionary of boundary classes
+	#Key: Color as string
+	#Value: id
+	#id is int between 0 and n(num of boundary classes)
 	def GetBoundaryClasses(img, pixelList):
-		#Key: Color as string
-		#Value: id
-		#id is int between 0 and n(num of boundary classes)
 		boundaryClasses = {}
 		j = 0
 		for i in range(len(pixelList)):
 			thisPix = img[pixelList[i][1],pixelList[i][0]]
+			#getting color as a string
 			colStr = ImageVec.GetColorString(thisPix)
+			#if not already a boundary class, make a new class
 			if(colStr not in boundaryClasses):
 				boundaryClasses[colStr] = j
 				j = j +1
 		return boundaryClasses
 
+	#Function to convert from color list [r,g,b] to string 'r,b,g'
 	def GetColorString(color):
 		colStr = np.array2string(color, precision=4, separator=',',
                       suppress_small=True)
 		return colStr[1:-1]
 
+	#Gets sum of forces of a particular point
 	def GetSumForce(indx, breakIndxs, kList):
 		leftDist = breakIndxs[indx]-breakIndxs[indx-1]
 		leftK = kList[breakIndxs[indx-1]]
