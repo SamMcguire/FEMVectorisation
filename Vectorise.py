@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import math
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
@@ -30,8 +31,11 @@ class ImageVec:
 		n = len(self.segments)
 
 		pnts = scale*(self.segments-np.min(self.segments))/(np.max(self.segments)-np.min(self.segments))
-		pnts = np.array([[pnt[0], 1-pnt[1]] for pnt in pnts ])
-		pnts = np.flipud(pnts)
+		pnts = np.array([[pnt[0], scale-pnt[1]] for pnt in pnts ])
+		if(pnts[0][0]>pnts[-1][0]):
+			pnts = np.flipud(pnts)
+		#print(f"This works fine: \n{pnts}")
+		#print(f"This Doesnt work.: \n{pnts}")
 		# print("Here is before transform")
 		# print(pnts)
 		# pnts = np.flipud(pnts)
@@ -62,7 +66,7 @@ class ImageVec:
 
 	#use integer for functions if using defualt funcs!!!!!
 	def GetVectorisation(self, kWidth = 20, blurRadius = 30, numSegments = 10,
-	 display = True):
+	 display = True, saveFig = ""):
 		self.pixelList = ImageVec.GetPixelList(self.img)
 		boundaryPnts = ImageVec.GetBoundaryPoints(self.img, self.pixelList)
 		self.boundaryClasses = ImageVec.GetBoundaryClasses(self.img, self.pixelList)
@@ -73,9 +77,11 @@ class ImageVec:
 		self.breakPoints = ImageVec.GetBreakPoints(numSegments, 1000, self.kList, boundaryPnts)
 		self.breakPoints = np.unique(self.breakPoints)
 
+		if(saveFig or display):
+			ImageVis.QuadPlot(self.img, self.pixelList, self.kList, self.boundaryClasses, self.breakPoints)
+		if(saveFig):
+			ImageVis.SaveFig(saveFig)
 		if(display):
-			ImageVis.QuadPlot(self.img, self.pixelList, self.kList, self.breakPoints)
-			#plt.savefig('huh.png', dpi=1000)
 			plt.show()
 
 		imgHeight = self.img.shape[0]
@@ -104,7 +110,8 @@ class ImageVec:
 			x,y = ImageVec.GetNextPixel(x,y,img)
 			if(x == -1 and i < numPixels-1):
 				print("Error in reading image!")
-				return pixelLst
+				ImageVis.PlotError(img, pixelLst)
+				return -1
 		return pixelLst
 
 	
@@ -203,7 +210,7 @@ class ImageVec:
 	def GetColorString(color):
 		colStr = np.array2string(color, precision=4, separator=',',
                       suppress_small=True)
-		return colStr
+		return colStr[1:-1]
 
 	def GetSumForce(indx, breakIndxs, kList):
 		leftDist = breakIndxs[indx]-breakIndxs[indx-1]
@@ -221,7 +228,7 @@ class ImageVec:
 
 
 class ImageVis:
-	def QuadPlot(img, pixelList, kList, breakPoints = []):
+	def QuadPlot(img, pixelList, kList, boundaryClasses, breakPoints = []):
 		x = np.arange(0,10)
 		y = np.arange(0,100, 10)
 		fig, axs = plt.subplots(2, 2)
@@ -237,7 +244,21 @@ class ImageVis:
 		ImageVis.PlotCurvature(kList, axs[1,1], breakPoints)
 		# axs[1, 1].plot(x + 2, y + 2)
 		# axs[1, 1].set_title("Curvature")
-		fig.tight_layout()
+		#fig.tight_layout()
+		ImageVis.MakeLegend(fig, boundaryClasses)
+
+		
+
+	def MakeLegend(fig, boundaryClasses):
+		handles = []
+		for key in boundaryClasses:
+			col = [float(i) for i in key.split(",")]
+			#print(boundaryClasses[key])
+			patch = mpatches.Patch(color=col, label=boundaryClasses[key])
+			handles.append(patch)
+
+		#red_patch = mpatches.Patch(color='red', label='The red data')
+		fig.legend(handles=handles)
 
 	def PlotCurvature(kList, ax, breakIndxs = []):
 		x = np.arange(0,kList.shape[0])
@@ -302,7 +323,29 @@ class ImageVis:
 
 		ax.set_title("Curved Image")
 
-	def Display():
-		print("gonna save bruv")
-		plt.savefig('huh.png', dpi=100)
+	def PlotError(img, pixelList):
+		img = img.copy()
+		height = img.shape[0]
+		width = img.shape[1]
+		for x in range(width):
+			for y in range(height):
+				if(not np.array_equal(img[y,x], [1,1,1])):
+					img[y,x] = [0,0,0]
+
+		i = 0
+		latest = 0
+		for pixel in pixelList:
+			img[pixel[1],pixel[0]] = [0.8,0.2,0.3]
+			if(pixel[0] !=0 and pixel[1] != 0):
+				latest = i
+			i += 1	
+
+		plt.imshow(img)
+		y = [pixelList[latest][1]]
+		x = [pixelList[latest][0]]
+		plt.scatter(x,y, color = "blue", s = 50)
+
 		plt.show()
+
+	def SaveFig(fileName):
+		plt.savefig(fileName, dpi=1000)
