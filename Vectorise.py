@@ -28,21 +28,41 @@ class ImageVec:
 	def GenerateGeometry(self, geo, scale = 1):
 		curves = []
 		n = len(self.segments)
+
 		pnts = scale*(self.segments-np.min(self.segments))/(np.max(self.segments)-np.min(self.segments))
+		pnts = np.array([[pnt[0], 1-pnt[1]] for pnt in pnts ])
+		pnts = np.flipud(pnts)
+		# print("Here is before transform")
+		# print(pnts)
+		# pnts = np.flipud(pnts)
+		# x = []
+		# y = []
+		# for pt in pnts:
+		# 	x.append(pt[0])
+		# 	y.append(pt[1])
+		# plt.plot(x,y)
+		# plt.show()
+
+		# print("Below is after transform")
+		# print(pnts)
 		newPts = [geo.AppendPoint(*pnt) for pnt in pnts]
 		i = 0
 		for i in range(n):
 			#print(f"Old Points: {self.segments[i]} New Points: {newPts[i]}")
-			pixLoc = self.segments[i]
+			pixLoc = self.segments[n-i-1]
 			colStr = ImageVec.GetColorString(self.img[pixLoc[1], pixLoc[0]])
 			name = str(self.boundaryClasses[colStr])
+			#name = "temp"
 			curves.append([["line", newPts[i], newPts[(i+1)%n]], name])
+
+		# for c in curves:
+		# 	print(c)
 
 		[geo.Append(c,bc=bc) for c,bc in curves];
 
 	#use integer for functions if using defualt funcs!!!!!
 	def GetVectorisation(self, kWidth = 20, blurRadius = 30, numSegments = 10,
-	 display = False):
+	 display = True):
 		self.pixelList = ImageVec.GetPixelList(self.img)
 		boundaryPnts = ImageVec.GetBoundaryPoints(self.img, self.pixelList)
 		self.boundaryClasses = ImageVec.GetBoundaryClasses(self.img, self.pixelList)
@@ -60,8 +80,8 @@ class ImageVec:
 
 		imgHeight = self.img.shape[0]
 		self.segments = [(self.pixelList[brk][0], self.pixelList[brk][1]) for brk in self.breakPoints ]
-		for segment in self.segments:
-			print(segment)
+		# for segment in self.segments:
+		# 	print(segment)
 		return self.segments
 
 
